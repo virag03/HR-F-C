@@ -12,10 +12,22 @@ CORS(app)
 with open('employee_attrition_model.pkl', 'rb') as file:
     attrition_model = pickle.load(file)
 
-# Retention policy model
-retention_model = pickle.load(open("retention_policy_model.pkl", "rb"))
-policy_encoder = pickle.load(open("policy_label_encoder.pkl", "rb"))
-scaler = pickle.load(open("scaler.pkl", "rb"))
+
+# Load the models and scaler
+with open('retention1_model.pkl', 'rb') as f:
+    model = pickle.load(f)
+
+with open('scaler1.pkl', 'rb') as f:
+    scaler = pickle.load(f)
+
+with open('kmeans1.pkl', 'rb') as f:
+    kmeans = pickle.load(f)
+
+with open('feature1_columns.pkl', 'rb') as f:
+    feature_columns = pickle.load(f)
+
+
+
 
 # ---------------------- Helper Function for Attrition ----------------------
 def preprocess_input(data):
@@ -33,6 +45,16 @@ def preprocess_input(data):
 
     df = df.reindex(columns=attrition_model.feature_names_in_, fill_value=0)
     return df
+
+def map_policy(cluster):
+    policies = {
+        0: "Improve Work-Life Balance + Reduce Overtime",
+        1: "Salary Hike + Recognition Programs",
+        2: "Offer Career Development & Upskilling",
+        3: "Job Role Rotation + Flexible Scheduling"
+    }
+    return policies.get(cluster, "Better Management + Mental Health Support")
+
 
 # ---------------------- Routes ----------------------
 
@@ -54,31 +76,51 @@ def predict():
     prediction = attrition_model.predict(processed_input)
     return jsonify({'prediction': int(prediction[0])})
 
-# Retention Policy Prediction Route
-@app.route('/predict-retention', methods=['POST'])
-def predict_retention():
+
+@app.route('/retention', methods=['POST'])
+def retention_form():
+    policy = None
+
+    # Safely get data
+    if request.is_json:
+        input_data = request.get_json()
+    else:
+        input_data = request.form.to_dict()
+
+    if not input_data:
+        return jsonify({'error': 'No input data received'}), 400
+
+    # Ensure no nested dicts sneak in
+    for key, value in input_data.items():
+        if isinstance(value, dict):
+            return jsonify({'error': f'Invalid value for "{key}": nested dictionaries are not allowed.'}), 400
+
+    input_df = pd.DataFrame([input_data])
+
     try:
-        data = request.json
-        features = np.array([
-            data["Age"], data["JobSatisfaction"], data["WorkLifeBalance"],
-            data["EnvironmentSatisfaction"], data["YearsAtCompany"],
-            data["YearsInCurrentRole"], data["YearsSinceLastPromotion"],
-            data["TotalWorkingYears"], data["MonthlyIncome"],
-            1 if data["OverTime"] == "Yes" else 0,
-            {"Travel_Rarely": 0, "Travel_Frequently": 1, "Non-Travel": 2}[data["BusinessTravel"]]
-        ]).reshape(1, -1)
-
-        features[:, :7] = scaler.transform(features[:, :7])
-        policy_prediction = retention_model.predict(features)[0]
-        recommended_policy = policy_encoder.inverse_transform([policy_prediction])[0]
-
-        return jsonify({
-            "RecommendedRetentionPolicy": recommended_policy
-        })
-
+        input_encoded = pd.get_dummies(input_df)
     except Exception as e:
-        return jsonify({"error": str(e)})
+        return jsonify({'error': f'Failed to encode input: {str(e)}'}), 400
+
+    for col in feature_columns:
+        if col not in input_encoded.columns:
+            input_encoded[col] = 0
+    input_encoded = input_encoded[feature_columns]
+
+    input_scaled = scaler.transform(input_encoded)
+    cluster = kmeans.predict(input_scaled)[0]
+    policy = map_policy(cluster)
+
+    return jsonify({'prediction': policy})
+
+
+
+
 
 # ---------------------- Run App ----------------------
 if __name__ == '__main__':
     app.run(debug=True)
+
+
+
+#   employee will stay karun dakhav
